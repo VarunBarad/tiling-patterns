@@ -67,6 +67,12 @@ fn main() {
                 .arg(arg!(--height <VALUE>).required(true))
                 .arg(arg!(--size <VALUE>).required(true))
                 .arg(
+                    arg!(--orientation <VALUE>)
+                        .required(true)
+                        .value_parser(["horizontal", "vertical"])
+                        .default_value("vertical"),
+                )
+                .arg(
                     arg!(--"base-color" <VALUE>)
                         .required(true)
                         .default_value("#1b4332"),
@@ -95,6 +101,12 @@ fn main() {
             eprintln!("No known pattern found")
         }
     }
+}
+
+#[derive(Clone)]
+enum Orientation {
+    Horizontal,
+    Vertical,
 }
 
 #[derive(Clone)]
@@ -390,13 +402,25 @@ fn handle_subcommand_hexagon(arguments: &ArgMatches) {
         .parse::<u32>()
         .unwrap();
 
+    let orientation = match arguments.get_one::<String>("orientation").unwrap().as_str() {
+        "horizontal" => Orientation::Horizontal,
+        "vertical" => Orientation::Vertical,
+        _ => panic!("'orientation' needs to be either 'vertical' or 'horizontal'"),
+    };
+
     let base_color = Srgb::from_str(arguments.get_one("base-color").unwrap() as &String)
         .unwrap()
         .into_format();
 
-    generate_hexagon_pattern(image_width, image_height, pattern_size, base_color)
-        .save(output_path)
-        .unwrap();
+    generate_hexagon_pattern(
+        image_width,
+        image_height,
+        pattern_size,
+        orientation,
+        base_color,
+    )
+    .save(output_path)
+    .unwrap();
 }
 
 fn generate_square_pattern(
@@ -420,7 +444,7 @@ fn generate_square_pattern(
     img
 }
 
-fn generate_hexagon_anchors(bounds: &Bounds, pattern_size: u32) -> Vec<[Point; 6]> {
+fn generate_hexagon_anchors_horizontal(bounds: &Bounds, pattern_size: u32) -> Vec<[Point; 6]> {
     let mut anchors: Vec<[Point; 6]> = Vec::new();
 
     let half_height = (PI / 3f64).sin() * (pattern_size as f64);
@@ -465,10 +489,67 @@ fn generate_hexagon_anchors(bounds: &Bounds, pattern_size: u32) -> Vec<[Point; 6
     anchors
 }
 
+fn generate_hexagon_anchors_vertical(bounds: &Bounds, pattern_size: u32) -> Vec<[Point; 6]> {
+    let mut anchors: Vec<[Point; 6]> = Vec::new();
+
+    let half_height = (PI / 3f64).sin() * (pattern_size as f64);
+
+    let mut j: f64 = 0f64;
+    'outer: loop {
+        let mut i: f64 = match (j as u64) % 2 == 0 {
+            true => -half_height,
+            false => 0f64,
+        };
+
+        let y: f64 = j * 1.5f64 * (pattern_size as f64);
+        'inner: loop {
+            let point_1 = Point { x: i, y: y };
+            let point_2 = Point {
+                x: i + half_height,
+                y: y - ((pattern_size as f64) / 2f64),
+            };
+            let point_3 = Point {
+                x: i + (2f64 * half_height),
+                y: y,
+            };
+            let point_4 = Point {
+                x: i + (2f64 * half_height),
+                y: y + (pattern_size as f64),
+            };
+            let point_5 = Point {
+                x: i + half_height,
+                y: y + (1.5f64 * (pattern_size as f64)),
+            };
+            let point_6 = Point {
+                x: i,
+                y: y + (pattern_size as f64),
+            };
+
+            anchors.push([point_1, point_2, point_3, point_4, point_5, point_6]);
+
+            i += 2f64 * half_height;
+
+            if i as u64 > bounds.width {
+                break 'inner;
+            }
+        }
+
+        j += 1f64;
+
+        let y = 1.5f64 * j * (pattern_size as f64);
+        if (y as u64) > bounds.height {
+            break 'outer;
+        }
+    }
+
+    anchors
+}
+
 fn generate_hexagon_pattern(
     image_width: u32,
     image_height: u32,
     pattern_size: u32,
+    orientation: Orientation,
     base_color: Rgb,
 ) -> ImageBuffer<Rgba<u8>, Vec<u8>> {
     let bounds = Bounds {
@@ -478,17 +559,19 @@ fn generate_hexagon_pattern(
 
     let mut img = RgbaImage::new(image_width, image_height);
 
-    generate_hexagon_anchors(&bounds, pattern_size)
-        .into_iter()
-        .for_each(|points| {
-            let color = Rgba::from_srgb(generate_color_like(base_color));
-            let coordinates = points.map(|point| imageproc::point::Point {
-                x: point.x as i32,
-                y: point.y as i32,
-            });
-
-            draw_polygon_mut(&mut img, &coordinates, color);
+    let anchors = match orientation {
+        Orientation::Horizontal => generate_hexagon_anchors_horizontal(&bounds, pattern_size),
+        Orientation::Vertical => generate_hexagon_anchors_vertical(&bounds, pattern_size),
+    };
+    anchors.into_iter().for_each(|points| {
+        let color = Rgba::from_srgb(generate_color_like(base_color));
+        let coordinates = points.map(|point| imageproc::point::Point {
+            x: point.x as i32,
+            y: point.y as i32,
         });
+
+        draw_polygon_mut(&mut img, &coordinates, color);
+    });
 
     img
 }
