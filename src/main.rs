@@ -1,6 +1,6 @@
 use clap::{arg, ArgMatches, Command};
 use image::{ImageBuffer, Rgba, RgbaImage};
-use imageproc::drawing::draw_filled_rect_mut;
+use imageproc::drawing::{draw_filled_rect_mut, draw_polygon_mut};
 use imageproc::rect::Rect;
 use palette::rgb::Rgb;
 use palette::{FromColor, Hsl, Srgb};
@@ -60,6 +60,19 @@ fn main() {
                 ),
         )
         .subcommand(
+            Command::new("hexagon")
+                .about("Create a pattern of hexagons")
+                .arg(arg!(--output <VALUE>).required(true))
+                .arg(arg!(--width <VALUE>).required(true))
+                .arg(arg!(--height <VALUE>).required(true))
+                .arg(arg!(--size <VALUE>).required(true))
+                .arg(
+                    arg!(--"base-color" <VALUE>)
+                        .required(true)
+                        .default_value("#1b4332"),
+                ),
+        )
+        .subcommand(
             Command::new("voronoi-random")
                 .about("Create a random voronoi pattern")
                 .arg(arg!(--output <VALUE>).required(true))
@@ -76,6 +89,7 @@ fn main() {
 
     match program_arguments.subcommand() {
         Some(("square", arguments)) => handle_subcommand_square(arguments),
+        Some(("hexagon", arguments)) => handle_subcommand_hexagon(arguments),
         Some(("voronoi-random", arguments)) => handle_subcommand_voronoi_random(arguments),
         _ => {
             eprintln!("No known pattern found")
@@ -92,6 +106,12 @@ struct Point {
 #[derive(Clone)]
 struct Anchor {
     point: Point,
+    color: Rgba<u8>,
+}
+
+#[derive(Clone)]
+struct HexCoordinates {
+    points: [Point; 6],
     color: Rgba<u8>,
 }
 
@@ -363,6 +383,28 @@ fn handle_subcommand_square(arguments: &ArgMatches) {
         .unwrap();
 }
 
+fn handle_subcommand_hexagon(arguments: &ArgMatches) {
+    let output_path = Path::new(arguments.get_one("output").unwrap() as &String);
+
+    let image_width = (arguments.get_one("width").unwrap() as &String)
+        .parse::<u32>()
+        .unwrap();
+    let image_height = (arguments.get_one("height").unwrap() as &String)
+        .parse::<u32>()
+        .unwrap();
+    let pattern_size = (arguments.get_one("size").unwrap() as &String)
+        .parse::<u32>()
+        .unwrap();
+
+    let base_color = Srgb::from_str(arguments.get_one("base-color").unwrap() as &String)
+        .unwrap()
+        .into_format();
+
+    generate_hexagon_pattern(image_width, image_height, pattern_size, base_color)
+        .save(output_path)
+        .unwrap();
+}
+
 fn generate_square_pattern(
     image_width: u32,
     image_height: u32,
@@ -379,6 +421,86 @@ fn generate_square_pattern(
             let pattern = Rect::at(x, y).of_size(pattern_size, pattern_size);
             draw_filled_rect_mut(&mut img, pattern, tile_color);
         }
+    }
+
+    img
+}
+
+fn generate_hexagon_anchors(bounds: &Bounds, pattern_size: u32) -> Vec<[Point; 6]> {
+    let mut anchors: Vec<[Point; 6]> = Vec::new();
+
+    let half_height = (PI / 3f64).sin() * (pattern_size as f64);
+
+    for i in (-(pattern_size as i64)..(bounds.width as i64)).step_by((3 * pattern_size) as usize) {
+        for j in
+            -(pattern_size as i64)..((((bounds.height as f64) / half_height).ceil() as i64) + 1)
+        {
+            let anchor_x: f64 = match j % 2 == 0 {
+                true => i as f64,
+                false => (i as f64) + ((pattern_size as f64) * 1.5f64),
+            };
+
+            let point_1 = Point {
+                x: anchor_x,
+                y: (j as f64) * half_height,
+            };
+            let point_2 = Point {
+                x: anchor_x + (pattern_size as f64),
+                y: (j as f64) * half_height,
+            };
+            let point_3 = Point {
+                x: anchor_x + ((pattern_size as f64) * 1.5f64),
+                y: ((j + 1) as f64) * half_height,
+            };
+            let point_4 = Point {
+                x: anchor_x + (pattern_size as f64),
+                y: ((j + 2) as f64) * half_height,
+            };
+            let point_5 = Point {
+                x: anchor_x,
+                y: ((j + 2) as f64) * half_height,
+            };
+            let point_6 = Point {
+                x: anchor_x - ((pattern_size as f64) * 0.5f64),
+                y: ((j + 1) as f64) * half_height,
+            };
+            anchors.push([point_1, point_2, point_3, point_4, point_5, point_6]);
+        }
+    }
+
+    anchors
+}
+
+fn generate_hexagon_coordinates(hex: &HexCoordinates) -> [imageproc::point::Point<i32>; 6] {
+    hex.points.clone().map(|point| imageproc::point::Point {
+        x: point.x as i32,
+        y: point.y as i32,
+    })
+}
+
+fn generate_hexagon_pattern(
+    image_width: u32,
+    image_height: u32,
+    pattern_size: u32,
+    base_color: Rgb,
+) -> ImageBuffer<Rgba<u8>, Vec<u8>> {
+    let bounds = Bounds {
+        width: image_width as u64,
+        height: image_height as u64,
+    };
+
+    let hexagons = generate_hexagon_anchors(&bounds, pattern_size)
+        .into_iter()
+        .map(|points| HexCoordinates {
+            points: points,
+            color: Rgba::from_srgb(generate_color_like(base_color)),
+        })
+        .collect::<Vec<HexCoordinates>>();
+
+    let mut img = RgbaImage::new(image_width, image_height);
+
+    for hex in hexagons {
+        draw_polygon_mut(&mut img, &generate_hexagon_coordinates(&hex), hex.color);
     }
 
     img
