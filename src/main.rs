@@ -109,12 +109,6 @@ struct Anchor {
     color: Rgba<u8>,
 }
 
-#[derive(Clone)]
-struct HexCoordinates {
-    points: [Point; 6],
-    color: Rgba<u8>,
-}
-
 struct Bounds {
     width: u64,
     height: u64,
@@ -471,13 +465,6 @@ fn generate_hexagon_anchors(bounds: &Bounds, pattern_size: u32) -> Vec<[Point; 6
     anchors
 }
 
-fn generate_hexagon_coordinates(hex: &HexCoordinates) -> [imageproc::point::Point<i32>; 6] {
-    hex.points.clone().map(|point| imageproc::point::Point {
-        x: point.x as i32,
-        y: point.y as i32,
-    })
-}
-
 fn generate_hexagon_pattern(
     image_width: u32,
     image_height: u32,
@@ -489,19 +476,19 @@ fn generate_hexagon_pattern(
         height: image_height as u64,
     };
 
-    let hexagons = generate_hexagon_anchors(&bounds, pattern_size)
-        .into_iter()
-        .map(|points| HexCoordinates {
-            points: points,
-            color: Rgba::from_srgb(generate_color_like(base_color)),
-        })
-        .collect::<Vec<HexCoordinates>>();
-
     let mut img = RgbaImage::new(image_width, image_height);
 
-    for hex in hexagons {
-        draw_polygon_mut(&mut img, &generate_hexagon_coordinates(&hex), hex.color);
-    }
+    generate_hexagon_anchors(&bounds, pattern_size)
+        .into_iter()
+        .for_each(|points| {
+            let color = Rgba::from_srgb(generate_color_like(base_color));
+            let coordinates = points.map(|point| imageproc::point::Point {
+                x: point.x as i32,
+                y: point.y as i32,
+            });
+
+            draw_polygon_mut(&mut img, &coordinates, color);
+        });
 
     img
 }
