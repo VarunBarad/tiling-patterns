@@ -24,6 +24,14 @@ fn generate_color_like(base: Srgb<f32>) -> Srgb<f32> {
     Rgb::from_color(new_hsl)
 }
 
+fn generate_color_like_v2(base: Srgb<f32>, lightness_ratio: f32) -> Srgb<f32> {
+    let hsl: Hsl = Hsl::from_color(base);
+    let new_lightness = hsl.lightness * lightness_ratio;
+    let new_hsl = Hsl::new(hsl.hue, hsl.saturation, new_lightness);
+
+    Rgb::from_color(new_hsl)
+}
+
 pub trait RgbaExtensions {
     fn from_srgb(input: Srgb<f32>) -> Rgba<u8>;
 }
@@ -444,8 +452,11 @@ fn generate_square_pattern(
     img
 }
 
-fn generate_hexagon_anchors_horizontal(bounds: &Bounds, pattern_size: u32) -> Vec<[Point; 6]> {
-    let mut anchors: Vec<[Point; 6]> = Vec::new();
+fn generate_hexagon_anchors_horizontal(
+    bounds: &Bounds,
+    pattern_size: u32,
+) -> Vec<(Point, [Point; 6])> {
+    let mut anchors: Vec<(Point, [Point; 6])> = Vec::new();
 
     let half_height = (PI / 3f64).sin() * (pattern_size as f64);
 
@@ -482,15 +493,27 @@ fn generate_hexagon_anchors_horizontal(bounds: &Bounds, pattern_size: u32) -> Ve
                 x: anchor_x - ((pattern_size as f64) * 0.5f64),
                 y: ((j + 1) as f64) * half_height,
             };
-            anchors.push([point_1, point_2, point_3, point_4, point_5, point_6]);
+
+            let point_center = Point {
+                x: (point_1.x + point_4.x) / 2f64,
+                y: (point_1.y + point_4.y) / 2f64,
+            };
+
+            anchors.push((
+                point_center,
+                [point_1, point_2, point_3, point_4, point_5, point_6],
+            ));
         }
     }
 
     anchors
 }
 
-fn generate_hexagon_anchors_vertical(bounds: &Bounds, pattern_size: u32) -> Vec<[Point; 6]> {
-    let mut anchors: Vec<[Point; 6]> = Vec::new();
+fn generate_hexagon_anchors_vertical(
+    bounds: &Bounds,
+    pattern_size: u32,
+) -> Vec<(Point, [Point; 6])> {
+    let mut anchors: Vec<(Point, [Point; 6])> = Vec::new();
 
     let half_height = (PI / 3f64).sin() * (pattern_size as f64);
 
@@ -525,7 +548,15 @@ fn generate_hexagon_anchors_vertical(bounds: &Bounds, pattern_size: u32) -> Vec<
                 y: y + (pattern_size as f64),
             };
 
-            anchors.push([point_1, point_2, point_3, point_4, point_5, point_6]);
+            let point_center = Point {
+                x: (point_1.x + point_4.x) / 2f64,
+                y: (point_1.y + point_4.y) / 2f64,
+            };
+
+            anchors.push((
+                point_center,
+                [point_1, point_2, point_3, point_4, point_5, point_6],
+            ));
 
             i += 2f64 * half_height;
 
@@ -557,21 +588,35 @@ fn generate_hexagon_pattern(
         height: image_height as u64,
     };
 
+    let canvas_origin = Point { x: 0f64, y: 0f64 };
+    let canvas_center = Point {
+        x: (image_width as f64) / 2f64,
+        y: (image_height as f64) / 2f64,
+    };
+    let squared_max_distance_from_center = canvas_center.squared_distance_from(&canvas_origin);
+
     let mut img = RgbaImage::new(image_width, image_height);
 
     let anchors = match orientation {
         Orientation::Horizontal => generate_hexagon_anchors_horizontal(&bounds, pattern_size),
         Orientation::Vertical => generate_hexagon_anchors_vertical(&bounds, pattern_size),
     };
-    anchors.into_iter().for_each(|points| {
-        let color = Rgba::from_srgb(generate_color_like(base_color));
-        let coordinates = points.map(|point| imageproc::point::Point {
-            x: point.x as i32,
-            y: point.y as i32,
-        });
+    anchors
+        .into_iter()
+        .for_each(|(hexagon_center, points_corners)| {
+            let coordinates = points_corners.map(|point| imageproc::point::Point {
+                x: point.x as i32,
+                y: point.y as i32,
+            });
+            let squared_distance_from_center = hexagon_center.squared_distance_from(&canvas_center);
+            let ratio_distance_from_center =
+                (squared_distance_from_center / squared_max_distance_from_center).sqrt() as f32;
+            let lightness_factor = (ratio_distance_from_center * 0.5f32) + 0.2f32;
 
-        draw_polygon_mut(&mut img, &coordinates, color);
-    });
+            let color = Rgba::from_srgb(generate_color_like_v2(base_color, lightness_factor));
+
+            draw_polygon_mut(&mut img, &coordinates, color);
+        });
 
     img
 }
